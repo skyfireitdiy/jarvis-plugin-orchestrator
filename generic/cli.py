@@ -1,8 +1,8 @@
 """通用编排器 CLI。
 
 用法：
-    python -m knowledge_toolkit.generic.cli run --plan plan.json --work-dir <dir>
-    python -m knowledge_toolkit.generic.cli run --plan plan.json --dry-run
+    orchestrator run --plan plan.json --work-dir <dir>
+    orchestrator run --plan plan.json --dry-run
 
 注意：本 CLI 只做「plan → result」的机械执行。它不构造任何提示词、不判定
 业务成功与否——这两件事必须由调用方通过 launcher / collector 注入。因此
@@ -28,7 +28,7 @@ from .models import PlanError, UnitResult, UnitSpec, load_plan, load_result
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="python -m knowledge_toolkit.generic.cli",
+        prog="orchestrator",
         description="通用编排器：按 plan 派发 unit，输出 result",
     )
     sub = p.add_subparsers(dest="cmd", required=True)

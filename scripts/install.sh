@@ -28,8 +28,10 @@ fi
 echo "✓ uv: $(command -v uv) ($(uv --version))"
 
 # 3) 用 uv 安装编排 CLI（从插件目录的 pyproject.toml）
-echo "==> uv tool install orchestrator（--force 覆盖已装版本）"
-uv tool install --force "$PLUGIN_DIR"
+#    -e editable 安装：CLI 直接链接插件源码目录，插件更新后立即生效，无需重装
+#    --refresh 强制重建，避免 uv 缓存导致装到旧版源码
+echo "==> uv tool install orchestrator（--force -e --refresh 覆盖已装版本）"
+uv tool install --force -e --refresh "$PLUGIN_DIR"
 
 if ! command -v orchestrator >/dev/null 2>&1; then
     echo "❌ 安装后未找到 orchestrator 命令，请检查 ~/.local/bin 是否在 PATH"

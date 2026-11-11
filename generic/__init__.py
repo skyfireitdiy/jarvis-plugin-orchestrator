@@ -4,7 +4,7 @@
 输出 result（每个 unit 的执行结果）。不认识 stage、不读写领域状态文件。
 
 对外主要入口：
-    from knowledge_toolkit.generic import Engine, load_plan, PlanSpec, UnitSpec
+    from generic import Engine, load_plan, PlanSpec, UnitSpec
 """
 from .models import (
     PlanError,

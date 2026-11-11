@@ -18,7 +18,7 @@ rules_load_dirs:
 # --- 生命周期钩子：安装后检测依赖并用 uv 安装 CLI ---
 hooks:
   post-install:
-    - "bash {{plugin_dir}}/scripts/install.sh"
+    - "bash scripts/install.sh"
 # --- 自定义能力清单（前端展示用）---
 capabilities:
   - name: "通用编排 CLI"
