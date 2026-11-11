@@ -11,6 +11,7 @@ description: >-
   硬依赖：tmux（并发 pane 派发）；uv（安装 CLI）；Python>=3.10，仅标准库。
 version: 1.0.0
 license: MIT
+logo: frontend/icon.svg
 # --- 扩展点（路径用 {{plugin_dir}} 占位，运行时渲染为插件绝对路径）---
 rules_load_dirs:
   - "{{plugin_dir}}/rules"
