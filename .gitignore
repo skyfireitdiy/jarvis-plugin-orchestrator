@@ -1,0 +1,111 @@
+# Python
+*.egg-info
+.coverage
+.eggs
+.hypothesis
+.installed.cfg
+.ipynb_checkpoints
+.mypy_cache
+.pyre
+.pytest_cache
+.pytype
+.ruff_cache
+.tox
+MANIFEST
+__pycache__
+develop-eggs
+downloads
+eggs
+htmlcov
+lib
+lib64
+parts
+pip-wheel-metadata
+sdist
+share
+var
+wheels
+.venv
+ENV
+env
+venv
+virtualenv
+
+# Rust
+target
+
+# Go
+bin
+coverage.out
+vendor
+
+# Node.js
+.next
+.npm
+.nuxt
+.pnpm
+.turbo
+.yarn
+build
+coverage
+dist
+node_modules
+out
+
+# Java
+*.class
+.gradle
+build
+out
+target
+
+# C/C++
+*.a
+*.dll
+*.dylib
+*.exe
+*.o
+*.obj
+*.pdb
+*.so
+bin
+build
+cmake-build-*
+obj
+out
+
+# .NET
+bin
+obj
+packages
+
+# Build artifacts
+bin
+build
+cmake-build-*
+dist
+obj
+out
+target
+
+# Dependencies
+dependencies
+deps
+external
+libraries
+libs
+node_modules
+packages
+third_party
+vendor
+
+# IDE & Editors
+.DS_Store
+.idea
+.vscode
+Thumbs.db
+playground
+sandbox
+
+# Jarvis
+.jarvis
