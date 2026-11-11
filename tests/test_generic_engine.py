@@ -414,3 +414,163 @@ def test_generic_package_has_no_domain_dependency():
                 assert m != "model" and not m.startswith("knowledge_toolkit.model"), (
                     f"{py} import 了 {m}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# Agent 派发模式（dispatcher）
+# ---------------------------------------------------------------------------
+def test_build_task_json_has_pin_and_fields(tmp_path):
+    """task JSON：task_desc 以 '<Pin>' 开头，含 background/additional_info/status_file。"""
+    from generic import UnitSpec, build_task_json, status_path
+
+    u = UnitSpec(
+        id="a",
+        task_desc="写一个 hello world 程序",
+        background="背景",
+        additional_info="附加",
+        stage="s1",
+    )
+    payload = build_task_json(u, tmp_path)
+    assert payload["task_desc"].startswith("'<Pin>'写一个 hello world 程序")
+    assert payload["background"] == "背景"
+    assert payload["additional_info"] == "附加"
+    assert payload["status_file"] == str(status_path(u, tmp_path))
+
+
+def test_status_path_prefers_unit_status_file(tmp_path):
+    """status_path：unit 自带 status_file 优先，否则自动生成 .generic/status/。"""
+    from generic import UnitSpec, status_path
+
+    u1 = UnitSpec(id="a", task_desc="x", status_file="/tmp/custom.status")
+    assert str(status_path(u1, tmp_path)) == "/tmp/custom.status"
+
+    u2 = UnitSpec(id="a", task_desc="x")
+    p = status_path(u2, tmp_path)
+    assert str(p).startswith(str(tmp_path / ".generic" / "status"))
+    assert p.name.endswith(".json")
+
+
+def test_build_jvs_command_writes_bash_script(tmp_path):
+    """Agent 模式：pane 命令是 `bash <script>`，脚本含 jvs 完整参数。"""
+    from generic import UnitSpec, build_jvs_command, script_path
+
+    u = UnitSpec(id="hello", task_desc="写 hello world", stage="s1")
+    pane_cmd = build_jvs_command(
+        u, tmp_path, jvs_bin="/fake/jvs", llm_group="default"
+    )
+    sp = script_path(u, tmp_path)
+    assert pane_cmd == f"bash {sp}"
+    assert sp.is_file()
+    body = sp.read_text(encoding="utf-8")
+    assert "export PATH=\"$HOME/.local/bin:$PATH\"" in body
+    assert "set -o pipefail" in body
+    assert "/fake/jvs -D -g default --task-file" in body
+    assert "--status-file" in body and "--stage s1" in body
+    assert "--non-interactive" in body
+    assert "2>&1 | tee" in body
+
+
+def test_build_jvs_command_no_stage_no_group(tmp_path):
+    """无 stage / 无 llm_group 时不拼对应参数。"""
+    from generic import UnitSpec, build_jvs_command, script_path
+
+    u = UnitSpec(id="a", task_desc="x")
+    build_jvs_command(u, tmp_path, jvs_bin="jvs")
+    body = script_path(u, tmp_path).read_text(encoding="utf-8")
+    assert "--stage" not in body
+    assert "-g " not in body
+    assert "jvs -D --task-file" in body
+
+
+def test_cli_launcher_dual_mode(tmp_path):
+    """launcher 双模式：unit 带 command→shell 模式；无 command→Agent 模式。"""
+    from generic import Engine, EngineOptions, UnitSpec
+    from generic.cli import _make_launcher_collector
+
+    tmux = FakeTmux()
+    eng = Engine(work_dir=tmp_path, options=EngineOptions(poll_interval=0.0), tmux=tmux)
+    launcher, _ = _make_launcher_collector(eng, jvs_bin="/fake/jvs")
+
+    # shell 模式：直接执行 command
+    u_shell = UnitSpec(id="s", task_desc="x", command="echo hi > out.txt")
+    launcher(u_shell, 0)
+    assert tmux.created[-1][1] == "echo hi > out.txt"
+
+    # Agent 模式：生成 jvs 命令（bash 脚本）
+    u_agent = UnitSpec(id="a", task_desc="写 hello world")
+    launcher(u_agent, 0)
+    pane_cmd = tmux.created[-1][1]
+    assert pane_cmd.startswith("bash ")
+    # jvs 命令在脚本内容里（pane 命令只是 bash <script>）
+    from generic import script_path
+
+    body = script_path(u_agent, tmp_path).read_text(encoding="utf-8")
+    assert "/fake/jvs -D" in body
+
+
+def test_collector_reads_status_and_stage_check(tmp_path):
+    """collector：读 status 文件判定 completed；stage 串台校验。"""
+    from generic import Engine, EngineOptions, UnitSpec
+    from generic.cli import _make_launcher_collector
+
+    tmux = FakeTmux()
+    eng = Engine(work_dir=tmp_path, options=EngineOptions(poll_interval=0.0), tmux=tmux)
+    _, collector = _make_launcher_collector(eng)
+
+    # 成功：status 文件 {"status": "completed"}
+    u_ok = UnitSpec(id="ok", task_desc="x", status_file=str(tmp_path / "ok.status"))
+    (tmp_path / "ok.status").write_text(
+        json.dumps({"status": "completed"}), encoding="utf-8"
+    )
+    res = collector(u_ok, "%1")
+    assert res.ok and res.status == "completed"
+
+    # stage 串台：status 文件 stage 与 unit.stage 不一致 → 视为未产出
+    u_stage = UnitSpec(id="st", task_desc="x", stage="s1",
+                       status_file=str(tmp_path / "st.status"))
+    (tmp_path / "st.status").write_text(
+        json.dumps({"status": "completed", "stage": "s2"}), encoding="utf-8"
+    )
+    res = collector(u_stage, "%2")
+    assert not res.ok and res.status == "no_status_file"
+
+    # 无 status 文件 → 失败
+    u_none = UnitSpec(id="none", task_desc="x", status_file=str(tmp_path / "nope.status"))
+    res = collector(u_none, "%3")
+    assert not res.ok and res.status == "no_status_file"
+
+
+def test_engine_agent_mode_end_to_end(tmp_path):
+    """端到端：Agent 模式 unit 经 Engine 跑通（FakeTmux + 预写 status 文件）。"""
+    from generic import Engine, EngineOptions, PlanSpec, UnitSpec
+
+    tmux = FakeTmux()
+
+    def launcher(u, attempt):
+        # 模拟 jvs Agent 完成：写 status 文件
+        from generic import status_path
+
+        sp = status_path(u, tmp_path)
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        sp.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
+        return tmux.create_pane("bash x", cwd=str(tmp_path))
+
+    def collector(u, pane):
+        from generic import status_path
+
+        sp = status_path(u, tmp_path)
+        data = json.loads(sp.read_text(encoding="utf-8"))
+        return UnitResult(id=u.id, ok=data.get("status") == "completed", status=data.get("status"))
+
+    eng = Engine(
+        work_dir=tmp_path,
+        options=EngineOptions(poll_interval=0.0),
+        tmux=tmux,
+        launcher=launcher,
+        collector=collector,
+        sleep=lambda s: None,
+    )
+    plan = PlanSpec(units=[UnitSpec(id="a", task_desc="写 hello world")])
+    run = eng.run(plan)
+    assert run.ok
+    assert run.results[0].id == "a"

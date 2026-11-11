@@ -18,6 +18,15 @@ from .models import (
 )
 from .engine import Engine, EngineOptions
 from .tmux_driver import TmuxDriver, TmuxError
+from .dispatcher import (
+    build_jvs_command,
+    build_task_json,
+    log_path,
+    script_path,
+    status_path,
+    task_json_path,
+    write_task_json,
+)
 
 __all__ = [
     "Engine",
@@ -29,7 +38,14 @@ __all__ = [
     "TmuxError",
     "UnitResult",
     "UnitSpec",
+    "build_jvs_command",
+    "build_task_json",
     "load_plan",
     "load_result",
+    "log_path",
     "save_result",
+    "script_path",
+    "status_path",
+    "task_json_path",
+    "write_task_json",
 ]

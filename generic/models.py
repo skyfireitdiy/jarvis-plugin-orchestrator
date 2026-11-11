@@ -68,6 +68,9 @@ class UnitSpec:
     background: str = ""
     additional_info: str = ""
     status_file: Optional[str] = None
+    # 阶段标识：Agent 模式派发 jvs 时写入 status 文件的 stage 字段，
+    # 用于多阶段流水线中区分/防串台（status 文件 stage 与 unit.stage 不一致视为无效）。
+    stage: Optional[str] = None
     timeout: Optional[float] = None
     # 同类限流：同一 concurrency_key 的活跃 unit 数不超过 concurrency_limit。
     # 缺省 key="default"、limit=None（= 用引擎全局并发上限）。
@@ -88,6 +91,7 @@ class UnitSpec:
             "background": self.background,
             "additional_info": self.additional_info,
             "status_file": self.status_file,
+            "stage": self.stage,
             "timeout": self.timeout,
             "concurrency_key": self.concurrency_key,
             "concurrency_limit": self.concurrency_limit,
@@ -208,6 +212,7 @@ def load_plan(path: str | Path) -> PlanSpec:
                 background=str(raw.get("background") or ""),
                 additional_info=str(raw.get("additional_info") or ""),
                 status_file=raw.get("status_file"),
+                stage=raw.get("stage"),
                 timeout=raw.get("timeout"),
                 concurrency_key=str(raw.get("concurrency_key") or "default"),
                 concurrency_limit=raw.get("concurrency_limit"),

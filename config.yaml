@@ -23,10 +23,12 @@ hooks:
 capabilities:
   - name: "通用编排 CLI"
     description: >-
-      orchestrator 命令：validate/dry_run/run/show 四个动作，按 plan 派发 unit
-      到 tmux pane 并发执行，支持 DAG 依赖、限流、batch 打包、超时、熔断。
-      由安装 hook（scripts/install.sh）用 uv 安装，依赖 tmux + uv。
+      orchestrator 命令：validate/dry_run/run/show 四个动作，按 plan 派发 unit。
+      双模式：unit 带 task_desc 时派发 Jarvis Agent（jvs --task-file，Agent 完成后
+      写 status 文件）；unit 带 command 时在 tmux pane 直接执行 shell 命令。
+      支持 DAG 依赖、限流、batch 打包、超时、熔断、stage 防串台。
+      由安装 hook（scripts/install.sh）用 uv 安装，依赖 tmux + uv + jvs。
   - name: "通用编排规则"
     description: >-
       rules/orchestrator.md：指导 Agent 何时用 orchestrator CLI、plan 格式
-      与 run 约定（command + status_file）。
+      与 run 约定（Agent 模式 task_desc → jvs Agent / shell 模式 command）。

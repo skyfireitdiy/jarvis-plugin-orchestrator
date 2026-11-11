@@ -4,15 +4,15 @@
     orchestrator run --plan plan.json --work-dir <dir>
     orchestrator run --plan plan.json --dry-run
 
-注意：本 CLI 只做「plan → result」的机械执行。它不构造任何提示词、不判定
-业务成功与否——这两件事必须由调用方通过 launcher / collector 注入。因此
-CLI 的 run 子命令要求 plan 里每个 unit 带 `command` 字段（要执行的 shell 命令）
-与 `status_file` 字段（执行方写 status 的路径），CLI 用它们做通用派发与判定：
+本 CLI 做「plan → result」的机械执行。它不构造提示词、不判定业务成功与否
+——这两件事通过 launcher / collector 注入。每个 unit 二选一：
 
-    - launcher: 在 tmux pane 里执行 unit.command
-    - collector: 读 unit.status_file，{"status": "completed"} 视为成功
+- **shell 模式**：unit 带 `command` 字段（要执行的 shell 命令），在 tmux
+  pane 里直接执行；
+- **Agent 模式**：unit 只有 `task_desc`（无 command），派发给 Jarvis Agent
+  （jvs --task-file），Agent 完成后写 status 文件。
 
-若需要更复杂的派发/判定（例如带重试提示词注入），请直接使用 Engine API。
+判定统一读 status 文件：`{"status": "completed"}` 视为成功。
 """
 from __future__ import annotations
 
@@ -44,6 +44,9 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument("--max-retries", type=int, default=2)
     r.add_argument("--tmux-session", default="generic-orchestrate")
     r.add_argument("--tmux-bin", default="tmux")
+    r.add_argument("--jvs-bin", default="jvs", help="jvs 可执行文件路径（Agent 模式）")
+    r.add_argument("--llm-group", default=None, help="Agent 模式使用的模型组（-g）")
+    r.add_argument("--stage", default=None, help="所有 unit 的默认阶段标识（Agent 模式）")
 
     v = sub.add_parser("validate", help="只校验 plan，不执行")
     v.add_argument("--plan", required=True)
@@ -65,19 +68,46 @@ def _print_dag(plan) -> None:
         print(f"  {i:3d}. {u.id}{deps}{grp}{key}{lim}{to}")
 
 
-def _make_launcher_collector(engine: Engine):
-    """CLI 的通用 launcher/collector：靠 unit 的 command / status_file 字段。"""
+def _make_launcher_collector(
+    engine: Engine,
+    jvs_bin: str = "jvs",
+    llm_group: Optional[str] = None,
+    default_stage: Optional[str] = None,
+):
+    """CLI 的通用 launcher/collector：双模式派发。
+
+    - **shell 模式**：unit 带 `command` 字段 → 在 tmux pane 里直接执行该命令。
+    - **Agent 模式**：unit 只有 `task_desc`（无 command）→ 生成 jvs 任务
+      （task JSON + bash 脚本）派发给 Jarvis Agent，Agent 完成后写 status 文件。
+
+    collector 统一读 status 文件判定：`{"status": "completed"}` 视为成功；
+    status 文件带 stage 字段且与 unit.stage 不一致时视为无效（防串台）。
+    """
 
     def launcher(unit: UnitSpec, attempt: int) -> str:
         cmd = getattr(unit, "command", None)
-        if not cmd:
-            raise ValueError(
-                f"unit「{unit.id}」缺 command 字段（CLI 模式要求 plan 里给出可执行命令）"
-            )
-        return engine.tmux.create_pane(cmd, cwd=str(engine.work_dir))
+        if cmd:
+            # shell 模式：直接执行 unit.command
+            return engine.tmux.create_pane(cmd, cwd=str(engine.work_dir))
+        # Agent 模式：生成 jvs 命令（bash 脚本包裹，兼容 pane 默认 fish shell）
+        from .dispatcher import build_jvs_command
+
+        pane_cmd = build_jvs_command(
+            unit,
+            engine.work_dir,
+            jvs_bin=jvs_bin,
+            llm_group=llm_group,
+            default_stage=default_stage,
+        )
+        return engine.tmux.create_pane(pane_cmd, cwd=str(engine.work_dir))
 
     def collector(unit: UnitSpec, pane: str) -> UnitResult:
         sf = unit.status_file
+        if not sf:
+            # Agent 模式：status 文件由 dispatcher 自动生成在 .generic/status/
+            from .dispatcher import status_path
+
+            sf = str(status_path(unit, engine.work_dir))
         status = None
         if sf:
             p = Path(sf)
@@ -85,7 +115,14 @@ def _make_launcher_collector(engine: Engine):
                 try:
                     data = json.loads(p.read_text(encoding="utf-8"))
                     if isinstance(data, dict):
-                        status = data.get("status")
+                        # stage 串台校验：status 文件带 stage 且与 unit.stage 不一致
+                        # → 不是本次产物，视为未产出（防上一次运行/别的阶段遗留）。
+                        got_stage = data.get("stage")
+                        if got_stage is not None and unit.stage is not None \
+                                and str(got_stage) != str(unit.stage):
+                            status = None
+                        else:
+                            status = data.get("status")
                 except (json.JSONDecodeError, OSError):
                     status = None
         if status == "completed":
@@ -150,7 +187,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         tmux_bin=args.tmux_bin,
     )
     engine = Engine(work_dir=work_dir, options=opts, log=lambda m: print(m, flush=True))
-    launcher, collector = _make_launcher_collector(engine)
+    launcher, collector = _make_launcher_collector(
+        engine,
+        jvs_bin=args.jvs_bin,
+        llm_group=args.llm_group,
+        default_stage=args.stage,
+    )
     engine._launcher = launcher  # noqa: SLF001（CLI 内部装配）
     engine._collector = collector  # noqa: SLF001
     result_path = args.result or str(work_dir / "result.json")
