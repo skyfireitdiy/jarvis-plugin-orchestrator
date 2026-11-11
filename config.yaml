@@ -1,0 +1,25 @@
+---
+id: orchestrator
+name: 通用编排器
+description: >-
+  通用编排器（generic engine）——与领域无关的批量任务执行引擎。
+  输入 plan（unit 清单，每个 unit 自带完整提示词或 shell 命令），
+  按 DAG 依赖排序、并发限流（concurrency_key/limit）、batch_group 打包、
+  超时/熔断/失败留痕，输出 result（每个 unit 的执行结果）。
+  用户说「编排」「批量派发任务」「按 plan 执行」「orchestrate」时使用。
+  硬依赖：tmux（并发 pane 派发）；Python>=3.10，仅标准库，无需额外安装。
+version: 1.0.0
+license: MIT
+# --- 扩展点（路径用 {{plugin_dir}} 占位，运行时渲染为插件绝对路径）---
+tool_load_dirs:
+  - "{{plugin_dir}}/tools"
+# --- 自定义能力清单（前端展示用）---
+capabilities:
+  - name: "通用编排执行"
+    description: >-
+      orchestrate 工具：validate/dry_run/run/show 四个动作，按 plan 派发 unit
+      到 tmux pane 并发执行，支持 DAG 依赖、限流、batch 打包、超时、熔断
+  - name: "通用编排引擎"
+    description: >-
+      generic 包（Engine/Scheduler/TmuxDriver）：可被其他插件/Agent 以
+      Python API 方式复用，零第三方依赖
