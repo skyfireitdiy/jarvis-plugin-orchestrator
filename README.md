@@ -143,11 +143,16 @@ plan 是 JSON 文件，`units` 数组，每个 unit：
 orchestrator validate --plan plan.json
 # 打印 DAG
 orchestrator run --plan plan.json --work-dir /tmp/orch --dry-run
-# 执行（派发 jvs Agent）
+# 执行（默认后台化：命令立即返回，编排在后台继续跑，最后写 result.json）
 orchestrator run --plan plan.json --work-dir /tmp/orch
-# 读结果
+# 读结果（后台跑完后）
 orchestrator show --result /tmp/orch/result.json
 ```
+
+> **后台化**：`orchestrator run` 默认在独立会话中后台执行编排，终端立即返回
+> （无需任何额外参数）。编排日志写入 `<work-dir>/.generic/orchestrator.log`，
+> 完成后结果写入 `<work-dir>/result.json`，可用 `orchestrator show` 查看。
+> 仅 `--dry-run` 不后台化（需要立即打印 DAG）。
 
 ### 示例：shell 模式
 

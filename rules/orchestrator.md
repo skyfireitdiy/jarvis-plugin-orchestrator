@@ -72,7 +72,7 @@ plan 是 JSON 文件，`units` 数组，每个 unit：
 orchestrator validate --plan plan.json
 # 打印 DAG 拓扑（不派发）
 orchestrator run --plan plan.json --work-dir /tmp/orch --dry-run
-# 执行（Agent 模式：派发 jvs Agent；shell 模式：直接跑命令）
+# 执行（默认后台化：命令立即返回，编排在后台继续跑，最后写 result.json）
 orchestrator run --plan plan.json --work-dir /tmp/orch
 # 指定 jvs 路径 / 模型组 / 默认阶段
 orchestrator run --plan plan.json --work-dir /tmp/orch \
@@ -80,6 +80,11 @@ orchestrator run --plan plan.json --work-dir /tmp/orch \
 # 读结果摘要
 orchestrator show --result /tmp/orch/result.json
 ```
+
+> **后台化**：`orchestrator run` 默认在独立会话中后台执行编排，终端立即返回
+> （无需任何额外参数，不要加 `--detach` 之类参数）。编排日志写入
+> `<work-dir>/.generic/orchestrator.log`，完成后结果写入 `<work-dir>/result.json`，
+> 用 `orchestrator show` 查看。仅 `--dry-run` 不后台化（需要立即打印 DAG）。
 
 `run` 的判定约定：unit 执行后读 `status_file`，其中
 `{"status": "completed"}` 视为成功；失败 unit 记录原因到

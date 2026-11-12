@@ -6,6 +6,7 @@ concurrency_key 限流、batch_group 打包、重试上限、熔断、result 落
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -387,6 +388,79 @@ def test_cli_validate_rejects_bad_plan(tmp_path):
     p = tmp_path / "bad.json"
     p.write_text(json.dumps({"units": [{"id": "a"}]}), encoding="utf-8")  # 缺 task_desc
     assert generic_main(["validate", "--plan", str(p)]) == 1
+
+
+# ---------------------------------------------------------------------------
+# 默认后台化（detach）
+# ---------------------------------------------------------------------------
+def test_cli_run_detaches_and_returns_immediately(tmp_path, monkeypatch):
+    """非 dry-run 且未 detach 时，main 拉起后台子进程并立即返回 0。"""
+    plan_file = tmp_path / "plan.json"
+    plan_file.write_text(
+        json.dumps({"units": [{"id": "a", "task_desc": "x"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    work = tmp_path / "w"
+    monkeypatch.delenv("ORCH_DETACHED", raising=False)
+
+    calls = {}
+    captured_env = {}
+
+    class FakePopen:
+        def __init__(self, argv, **kwargs):
+            calls["argv"] = argv
+            calls["kwargs"] = kwargs
+            captured_env.update(kwargs.get("env", {}))
+
+    monkeypatch.setattr("generic.cli.subprocess.Popen", FakePopen)
+    # 模拟真实 CLI 调用：sys.argv 即用户输入的命令行参数
+    cli_argv = ["run", "--plan", str(plan_file), "--work-dir", str(work)]
+    monkeypatch.setattr("sys.argv", ["orchestrator", *cli_argv])
+    rc = generic_main(cli_argv)
+    assert rc == 0
+    # 拉起的是「python -m generic.cli + 原参数」（原参数原样透传）
+    assert calls["argv"][:3] == [sys.executable, "-m", "generic.cli"]
+    assert calls["argv"][3:] == cli_argv
+    assert "-m" in calls["argv"] and "generic.cli" in calls["argv"]
+    # 后台子进程带 ORCH_DETACHED=1 标记，避免递归
+    assert captured_env.get("ORCH_DETACHED") == "1"
+    # 独立会话 + 脱离终端
+    assert calls["kwargs"]["start_new_session"] is True
+    assert calls["kwargs"]["stdin"] is not None
+    # 日志文件已建
+    assert (work / ".generic" / "orchestrator.log").is_file()
+
+
+def test_cli_run_detached_env_skips_redetach(tmp_path, monkeypatch):
+    """ORCH_DETACHED=1 时（后台子进程）不再 detach，走正常执行路径。"""
+    plan_file = tmp_path / "plan.json"
+    plan_file.write_text(
+        json.dumps({"units": [{"id": "a", "task_desc": "x"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    work = tmp_path / "w"
+    monkeypatch.setenv("ORCH_DETACHED", "1")
+    monkeypatch.setattr("generic.cli.subprocess.Popen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("不应再 detach")))
+
+    # 后台子进程会真正执行 engine.run；用 FakeTmux 场景下 unit 无 command，
+    # 走 Agent 模式会尝试 build_jvs_command（只写文件，不派发真实 tmux）。
+    # 这里用 dry-run 语义验证：detach 分支在 dry-run 前，但 ORCH_DETACHED=1
+    # 时直接跳过 detach。为避免真实跑 engine，这里只验证「不会 detach」，
+    # 通过让 Popen 抛异常来断言 detach 分支未触发。
+    from generic.cli import main as m
+    # 直接调用 _detach_and_exit 不应被触发：用 monkeypatch 让 engine.run 抛
+    # 特定异常来确认走到了执行路径而非 detach 路径
+    import generic.cli as cli_mod
+
+    def fake_engine_run(*a, **k):
+        raise RuntimeError("REACHED_ENGINE_RUN")
+
+    monkeypatch.setattr(cli_mod.Engine, "run", fake_engine_run)
+    try:
+        m(["run", "--plan", str(plan_file), "--work-dir", str(work)])
+        assert False, "应走到 engine.run 并抛出 REACHED_ENGINE_RUN"
+    except RuntimeError as exc:
+        assert str(exc) == "REACHED_ENGINE_RUN"
 
 
 # ---------------------------------------------------------------------------

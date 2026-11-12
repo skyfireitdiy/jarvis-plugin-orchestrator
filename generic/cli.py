@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -142,6 +144,33 @@ def _make_launcher_collector(
     return launcher, collector
 
 
+def _detach_and_exit(args, work_dir: Path) -> None:
+    """把编排重新拉起为后台进程，父进程立即返回。
+
+    用 subprocess.Popen 以独立会话（start_new_session）重新执行自身，
+    脱离当前终端（关终端不杀编排）；stdout/stderr 重定向到
+    <work_dir>/.generic/orchestrator.log，方便事后回溯。通过环境变量
+    ORCH_DETACHED=1 标记后台子进程，避免无限递归。
+    """
+    log_path = Path(work_dir) / ".generic" / "orchestrator.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = open(log_path, "a", encoding="utf-8")  # noqa: SIM115（需持有句柄）
+    env = dict(os.environ)
+    env["ORCH_DETACHED"] = "1"
+    argv = [sys.executable, "-m", "generic.cli", *sys.argv[1:]]
+    subprocess.Popen(
+        argv,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+    print(f"▶ 编排已在后台启动（PID 见日志），result 将写入 {work_dir / 'result.json'}")
+    print(f"  日志：{log_path}")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
 
@@ -178,6 +207,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     work_dir = Path(args.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+
+    # 默认后台化：父进程立即返回，编排在独立会话里继续跑，最后写 result.json。
+    # 用环境变量标记后台子进程，避免无限递归；dry-run 不后台化（要立即打印 DAG）。
+    if not args.dry_run and os.environ.get("ORCH_DETACHED") != "1":
+        _detach_and_exit(args, work_dir)
+        return 0
+
     opts = EngineOptions(
         max_concurrency=args.max_concurrency,
         poll_interval=args.poll_interval,
